@@ -1,0 +1,113 @@
+pipeline {
+    agent any
+    
+    tools{
+        jdk 'jdk17'
+        maven 'maven3'
+    }
+    
+    environment{
+        SCANNER_HOME=tool 'sonar-scanner'
+    }
+    
+    stages {
+        stage('Git checkout') {
+            steps {
+                git branch: 'main', url: 'https://github.com/vijkes/Shopping-cart.git'
+            }
+        }
+        stage('compile') {
+            steps {
+                sh "mvn clean compile"
+            }
+        }
+        // stage('test cases') {
+        //     steps {
+        //         sh "mvn test"
+        //     }
+        // }
+        
+        stage('sonarqube-analysis') {
+            steps {
+                withSonarQubeEnv('sonar-server') {
+                    sh '''$SCANNER_HOME/bin/sonar-scanner -Dsonar.projectName=Petclinic \
+                    -Dsonar.java.binaries=. \
+                    -Dsonar.projectKey=Petclinic '''
+                }
+            }
+        }
+        
+        stage('build') {
+            steps {
+                sh "mvn clean package -DskipTests=true"
+            }
+        }
+        
+        stage('OWASP dependency check') {
+            steps {
+                dependencyCheck additionalArguments: '--scan target/', odcInstallation: 'dp_chk'
+                dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+            }
+        }
+        
+        
+        stage('docker build') {
+            steps {
+                script {
+                    withDockerRegistry(credentialsId: 'docker-cred', toolName: 'docker_install') {
+                        sh " docker build -t shopping-cart -f docker/Dockerfile ."
+                        sh "docker tag shopping-cart vijkes/shopping-cart:latest"
+                        sh "docker push vijkes/shopping-cart:latest"
+                    }    
+                }
+                
+            }
+        }
+        stage('docker push') {
+            steps {
+                script {
+                    withDockerRegistry(credentialsId: 'docker-cred', toolName: 'docker_install') {
+                        sh "docker push vijkes/shopping-cart:latest"
+                    }    
+                }
+                
+            }
+        }
+        stage('docker run') {
+            steps {
+                script {
+                    withDockerRegistry(credentialsId: 'docker-cred', toolName: 'docker_install') {
+                        sh 'docker ps -a --filter "name=^/shopping" --format "{{.ID}}" | xargs -r docker rm -f'
+                        sh "docker run -d --name shoppingCart -p 8070:8070 vijkes/shopping-cart"
+                    }    
+                }
+                
+            }
+        }
+        
+        
+        // stage('mvn nexus') {
+        //     steps {
+        //         configFileProvider([configFile(fileId: '3481761b-8c2e-43e1-bd65-c01fbcddf44b', variable: 'mavensettings')]) {
+        //             sh "mvn -s $mavensettings clean deploy -DskipTests=true"
+        //         }
+        //     }
+        // }
+        
+        // stage('deploy') {
+        //     steps {
+        //         sh "cp target/*.war /opt/apache-tomcat-9.0.89/webapps"
+        //     }
+        // }
+        // stage('Git checkout') {
+        //     steps {
+        //         git branch: 'main', url: 'https://github.com/vijkes/Petclinic.git'
+        //     }
+        // }
+        // stage('Git checkout') {
+        //     steps {
+        //         git branch: 'main', url: 'https://github.com/vijkes/Petclinic.git'
+        //     }
+        // }
+    }
+}
